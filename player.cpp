@@ -5,15 +5,16 @@
 #include "player.h"
 Player::Player(int type): playerType(type) {}
 
-int Player::getPlayerType() {
+int Player::getPlayerType() const {
     return playerType;
 }
+
 // makeMove
 // inserts the player symbol on the board in the given location
-void Player::makeMove(Board & theBoard, int row, int col, int playerType){
+void Player::makeMove(Board & theBoard, int row, int col){
     if (playerType) {
-        theBoard.getCell(row,col) = "x";
+        theBoard.setCell(row,col, "x");
     } else if(playerType == 0) {
-        theBoard.getCell(row, col) = "o";
+        theBoard.setCell(row, col, "o");
     }
 }

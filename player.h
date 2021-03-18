@@ -10,11 +10,11 @@
 
 class Player {
 public:
+    using Place = std::pair<int, int>;
     explicit Player(int type);
-    void makeMove(Board & theBoard, int row, int col, int playerType);
-    int getPlayerType();
+    void makeMove(Board & theBoard, int row, int col);
+    int getPlayerType() const;
 private:
     int playerType;
-
 };
 #endif //TICTACTOEBOT_PLAYER_H

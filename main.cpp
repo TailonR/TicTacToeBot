@@ -2,30 +2,25 @@
 // Author: Tailon Russell
 // The purpose of this file is to contain the main
 //      program to start a tic tac toe game
-#include <iostream>
-#include <utility>
-#include <vector>
-#include <string>
-#include <fstream>
-#include <chrono>
-#include <thread>
-#include <algorithm>
 #include <queue>
 #include "player.h"
-#include "board.h"
 #include "turnOutcome.h"
 #include "aiLogic.h"
 #include "dataManager.h"
 
 // playGame
 // This is the function for the gameplay
-std::tuple<bool, int, std::priority_queue<TurnOutcome>> playGame(int save, int player1Depth, int player2Depth, int playGame, bool pruning) {
+std::tuple<bool, int, std::priority_queue<TurnOutcome>> playGame(int save, int player1Depth, int player2Depth, int playGame, bool pruning, int searchTime) {
     Board board(5,5); // 5x5 board
+    std::random_device rd;
+    std::mt19937 mt(rd());
+    std::uniform_int_distribution<int> randRow(0, board.rowSize());
+    std::uniform_int_distribution<int> randCol(0, board.colSize());
     enum type {o = 0, x = 1, none};
-    Player player1(o);
-    Player player2(x);
-    Minimax minimax (player1.getPlayerType(), player2.getPlayerType());
-    AlphaBeta alphaBeta (player1.getPlayerType(), player2.getPlayerType());
+    std::vector<Player> players = {Player(o), Player(x)};
+//    Minimax minimax (players[0].getPlayerType(), players[1].getPlayerType());
+    AlphaBeta alphaBeta (players[0].getPlayerType(), players[1].getPlayerType());
+    MCTS mcts;
     DataManager dataManager;
 
     std::tuple<bool, int, std::priority_queue<TurnOutcome>> gameWon;
@@ -33,13 +28,12 @@ std::tuple<bool, int, std::priority_queue<TurnOutcome>> playGame(int save, int p
     bool tie = false;
 
     bool saveGame = save;
-    bool repeat = false;
+    bool repeat;
     int turn = o;
     int turnCount = 0;
-    int userRow;
-    int userCol;
+    int userRow = -1;
+    int userCol = -1;
     int boardCount = 0;
-    std::priority_queue<TurnOutcome> testCout;
     // Clear the saved game data
     dataManager.clearData();
     // Here we want to loop until the game is won; this is the bulk of the gameplay
@@ -54,26 +48,25 @@ std::tuple<bool, int, std::priority_queue<TurnOutcome>> playGame(int save, int p
                 std::cout << "Enter a column number (0-" << board.board[0].size()-1 << "): " << std::endl;
                 std::cin >> userCol;
                 if(board.validLocation(userRow, userCol))
-                    player1.makeMove(board, userRow, userCol, player1.getPlayerType());
+                    players[0].makeMove(board, userRow, userCol);
                 else
                     repeat = true;
             } else {
                 if(player1Depth == 0) {
-                    std::srand(time(0));
-                    int row = std::rand()%board.board.size();
-                    int col = std::rand()%board.board[0].size();
+                    int row = randRow(mt);
+                    int col = randCol(mt);
                     if(board.validLocation(row, col))
-                        player1.makeMove(board, row, col, player1.getPlayerType());
+                        players[0].makeMove(board, row, col);
                     else
                         repeat = true;
 
                } else {
                     clock_t start = clock();
-                    auto player1Move = (pruning)? std::get<0>(alphaBeta.alphaBetaMinimax(board, player1Depth, -1000000000, 1000000000, true, player1.getPlayerType(), boardCount)):
-                                       std::get<0>(minimax.minimax(board, player1Depth, true, player1.getPlayerType(), boardCount));
+                    auto player1Move = (pruning)? std::get<0>(alphaBeta.alphaBetaMinimax(board, player1Depth, -1000000000, 1000000000, true, players[0], boardCount)):
+                                       mcts.search(board, searchTime, players, turn);
                     clock_t end = clock();
                     auto timeSpent = (end-start)/CLOCKS_PER_SEC;
-                    player1.makeMove(board, std::get<0>(player1Move), std::get<1>(player1Move), player1.getPlayerType());
+                    players[0].makeMove(board, std::get<0>(player1Move), std::get<1>(player1Move));
                     int boardProcessingSpeed = (timeSpent>0? boardCount/timeSpent: boardCount);
                     auto turnInfo = TurnOutcome(player1Depth, turnCount, boardProcessingSpeed, pruning);
                     turnOutcomes.push(turnInfo);
@@ -84,21 +77,22 @@ std::tuple<bool, int, std::priority_queue<TurnOutcome>> playGame(int save, int p
         else {
             turnCount++;
             if (player2Depth == 0) {
-                int row = std::rand()%board.board.size();
-                int col = std::rand()%board.board[0].size();
+                int row = randRow(mt);
+                int col = randCol(mt);
                 if(board.validLocation(row, col)) {
-                    player2.makeMove(board, row, col, player2.getPlayerType());
+                    players[1].makeMove(board, row, col);
                 }
                 else
                     repeat = true;
             } else {
                 boardCount = 0;
                 clock_t start = clock();
-                auto player2Move = (pruning)? std::get<0>(alphaBeta.alphaBetaMinimax(board, player2Depth, -1000000000, 1000000000, true, player2.getPlayerType(), boardCount)):
-                                   std::get<0>(minimax.minimax(board, player2Depth, true, player2.getPlayerType(), boardCount));
+                auto player2Move = (!pruning)? std::get<0>(alphaBeta.alphaBetaMinimax(board, player2Depth, -1000000000, 1000000000, true, players[1], boardCount)):
+                                    mcts.search(board, searchTime, players, turn);
+
                 clock_t end = clock();
                 auto timeSpent = (end-start)/CLOCKS_PER_SEC;
-                player2.makeMove(board, std::get<0>(player2Move), std::get<1>(player2Move), player2.getPlayerType());
+                players[1].makeMove(board, std::get<0>(player2Move), std::get<1>(player2Move));
                 int boardProcessingSpeed = (timeSpent>0? boardCount/timeSpent: boardCount);
                 auto turnInfo = TurnOutcome(player2Depth, turnCount, boardProcessingSpeed, pruning);
                 turnOutcomes.push(turnInfo);
@@ -220,7 +214,7 @@ int main() {
        std::cin >> player2Depth;
    }
 
-    auto gameOutput = playGame(saveTheGame, player1Depth, player2Depth, playTheGame, pruning);
+    auto gameOutput = playGame(saveTheGame, player1Depth, player2Depth, playTheGame, pruning, 60);
 
     if(!playTheGame) {
         if(std::get<0>(gameOutput)) {
@@ -240,6 +234,155 @@ int main() {
         if (recapGame)
             dataManager.loadGame();
     }
+
+
+/////////////////////// Part A //////////////////////////////
+//    std::vector<Player> players = { Player(o), Player(x)};
+//    MCTS mcts(players[0].getPlayerType(), players[1].getPlayerType());
+//    AlphaBeta alphaBeta(players[0].getPlayerType(), players[1].getPlayerType());
+//    Minimax minimax(players[0].getPlayerType(), players[1].getPlayerType());
+//    Board board(5, 5);
+//
+//    bool tie = false;
+//    int turn;
+//    int turnCount = 0;
+//    int boardCount = 0;
+//
+////    std::cout << board.board;
+////    std::cout << std::endl;
+//
+////    while (!std::get<0>(board.gameWinningMove()) && !tie) {
+////        std::vector<std::vector<int>> boardScores (board.rowSize(), std::vector<int>(board.colSize()));
+////        if(turn == o) {
+////            turnCount++;
+//////            auto player1Move = std::get<0>(minimax.minimax(board, 3, true, players[0], boardCount));
+//////            players[0].makeMove(board, std::get<0>(player1Move), std::get<1>(player1Move));
+////
+////            auto start = clock();
+//////            auto player1Move = mcts.search(board, 60, players, 1);
+////            auto player1Move = std::get<0>(alphaBeta.alphaBetaMinimax(board, 4, -1000000000, 1000000000, true, players[1], boardCount));
+////            auto end = clock();
+////            int duration = (end - start)/CLOCKS_PER_SEC;
+////            players[0].makeMove(board, std::get<0>(player1Move), std::get<1>(player1Move));
+////            boardCount = mcts.getBoardsProcessed();
+////            int bpps = boardCount/(duration>0?duration: 1);
+////            std::cout << turnCount << "-" << boardCount << "-" << bpps << std::endl;
+////        }
+////        else {
+////            turnCount++;
+////            auto start = clock();
+////            auto player2Move = mcts.search(board, 60, players, 1);
+////            auto end = clock();
+////            int duration = (end - start)/CLOCKS_PER_SEC;
+////            players[1].makeMove(board, std::get<0>(player2Move), std::get<1>(player2Move));
+////            boardCount = mcts.getBoardsProcessed();
+////            int bpps = boardCount/duration;
+////            std::cout << turnCount << "-" << boardCount << "-" << bpps << std::endl;
+////        }
+////        turn = !turn;
+////
+//////        std::cout << board.board;
+//////        std::cout << std::endl;
+////        if(board.getValidLocations().empty())
+////            tie = true;
+////    }
+////    std::cout << (std::get<0>(board.gameWinningMove())? (std::get<1>(board.gameWinningMove())? "x": "o"): "No one") << " won" << std::endl;
+///////////////////// End Part A ////////////////////////////
+
+
+/////////////////////// Part B //////////////////////////////
+//    std::vector<Player> players = {Player(o), Player(x)};
+//    Board onlineBoard(5, 5);
+////    onlineBoard.board[0][0] = "o";
+////    onlineBoard.board[0][1] = "o";
+////    onlineBoard.board[0][2] = "o";
+////    onlineBoard.board[0][3] = "x";
+//    onlineBoard.board[0][4] = "x";
+//// ------------------------------
+//    onlineBoard.board[1][0] = "x";
+//    onlineBoard.board[1][1] = "x";
+//    onlineBoard.board[1][2] = "o";
+//    onlineBoard.board[1][3] = "x";
+////    onlineBoard.board[1][4] = "x";
+//// ------------------------------
+////    onlineBoard.board[2][0] = "x";
+//    onlineBoard.board[2][1] = "x";
+//    onlineBoard.board[2][2] = "o";
+//    onlineBoard.board[2][3] = "o";
+////    onlineBoard.board[2][4] = "x";
+//// ------------------------------
+////    onlineBoard.board[3][0] = "x";
+//    onlineBoard.board[3][1] = "o";
+////    onlineBoard.board[3][2] = "x";
+////    onlineBoard.board[3][3] = "o";
+////    onlineBoard.board[3][4] = "x";
+//// ------------------------------
+////    onlineBoard.board[4][0] = "x";
+////    onlineBoard.board[4][1] = "x";
+//    onlineBoard.board[4][2] = "o";
+//    onlineBoard.board[4][3] = "o";
+////    onlineBoard.board[4][4] = "o";
+//    Board offlineBoard = onlineBoard;
+////    Board offlineBoard(5,5);
+//
+//    AlphaBeta alphaBeta(players[0].getPlayerType(), players[1].getPlayerType());
+//    MCTS mcts(players[0].getPlayerType(), players[1].getPlayerType());
+//
+//    std::cout << "The current onlineBoard: " << std::endl;
+//    std::cout << onlineBoard.board;
+//    std::cout << std::endl;
+//
+//    int boardCount = 0;
+//
+//    auto start = std::chrono::high_resolution_clock::now();
+////    auto playerMove = std::get<0>(alphaBeta.alphaBetaMinimax(onlineBoard, 4, -1000000000, 1000000000, true, players[0], boardCount));
+//    auto elapsed = std::chrono::high_resolution_clock::now() - start;
+//    long long microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+////    std::cout << "The best move found using regular alpha beta: " << std::get<0>(playerMove) << ", " << std::get<1>(playerMove) << "   time elapsed: " << microseconds << std::endl;
+//
+//    start = std::chrono::high_resolution_clock::now();
+//    auto playerMoveOffline = std::get<0>(alphaBeta.alphaBetaOffline(offlineBoard, -1000000000, 1000000000, true, players[1], boardCount));
+//    elapsed = std::chrono::high_resolution_clock::now() - start;
+//    microseconds = std::chrono::duration_cast<std::chrono::microseconds>(elapsed).count();
+//    std::cout << "The best move found using offline alpha beta: " << std::get<0>(playerMoveOffline) << ", " << std::get<1>(playerMoveOffline) << "   time elapsed: " << microseconds << std::endl;
+//
+//    int searchTime = 5;
+//    std::pair<int,int> playerMoveMCTS;
+//    bool firstAttempt = true;
+//    while(true) {
+//        if(!firstAttempt)
+//            std::cout << "Trying again" << std::endl;
+//        playerMoveMCTS = mcts.search(offlineBoard, searchTime, players, 1);
+//        firstAttempt = false;
+//        if (std::get<0>(playerMoveOffline) == std::get<0>(playerMoveMCTS))
+//            if (std::get<1>(playerMoveOffline) == std::get<1>(playerMoveMCTS))
+//                break;
+//
+//        searchTime += 5;
+//    }
+//    std::cout << "The best move found using mcts: " << std::get<0>(playerMoveMCTS) << ", " << std::get<1>(playerMoveMCTS) << "   search time: " << searchTime << std::endl;
+
+//    bool tie = false;
+//    int turn;
+//    while (!std::get<0>(onlineBoard.gameWinningMove()) && !tie) {
+//        std::vector<std::vector<int>> boardScores (onlineBoard.rowSize(), std::vector<int>(onlineBoard.colSize()));
+//        if(turn == o) {
+////            auto player1Move = mcts.search(onlineBoard, 15, players, 0);
+//            auto player1Move = std::get<0>(alphaBeta.alphaBetaMinimax(onlineBoard, 4, -1000000000, 1000000000, true, players[0], boardCount));
+//            players[0].makeMove(onlineBoard, std::get<0>(player1Move), std::get<1>(player1Move));
+//        }
+//        else {
+//            auto player2Move = std::get<0>(alphaBeta.alphaBetaMinimax(onlineBoard, 4, -1000000000, 1000000000, true, players[1], boardCount));;
+//            players[1].makeMove(onlineBoard, std::get<0>(player2Move), std::get<1>(player2Move));
+//        }
+//        turn = !turn;
+//
+//        std::cout << onlineBoard.board;
+//        std::cout << std::endl;
+//        if(onlineBoard.getValidLocations().empty())
+//            tie = true;
+//    }
+///////////////////// End Part B ////////////////////////////
 
     return 0;
 }
